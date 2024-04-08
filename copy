@@ -1,0 +1,240 @@
+CT_path, MR_path = CT_tumors, MR_tumors
+CT_indexes, MR_indexes = CT_indexes_list, MR_indexes_list
+new_shape = [92, 160, 160]
+for ct_path, mr_path, ct_index, mr_index in zip(CT_path, MR_path, CT_indexes, MR_indexes):
+    # 读取相应的图像数据
+    ct_image = sitk.ReadImage(ct_path)
+    mr_image = sitk.ReadImage(mr_path)
+    ct_array = sitk.GetArrayFromImage(ct_image)
+    mr_array = sitk.GetArrayFromImage(mr_image)
+    # 读取对应的形状大小
+    ct_shape = ct_array.shape
+    mr_shape = mr_array.shape
+    # 进行大小判断，如果大小过小，则在需要进行补零操作，采取的方案是直接两侧补零
+    # 首先是CT大小的判断，需要进行对称操作
+    # 存储偏移量
+    ct_pad_size, mr_pad_size = np.array([0, 0, 0]), np.array([0, 0, 0])
+    if ct_shape[0] < new_shape[0]:
+        pad_size = int((new_shape[0] - ct_shape[0]) / 2)
+        ct_pad_size[0] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((pad_size + 1, pad_size + 1), (0, 0), (0, 0)))
+        # 对称操作
+        mr_array = np.pad(mr_array, pad_width=((pad_size + 1, pad_size + 1), (0, 0), (0, 0)))
+    if ct_shape[1] < new_shape[1]:
+        pad_size = int((new_shape[1] - ct_shape[1]) / 2)
+        ct_pad_size[1] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((0, 0), (pad_size + 1, pad_size + 1), (0, 0)))
+        mr_array = np.pad(mr_array, pad_width=((0, 0), (pad_size + 1, pad_size + 1), (0, 0)))
+    if ct_shape[2] < new_shape[2]:
+        pad_size = int((new_shape[2] - ct_shape[2]) / 2)
+        ct_pad_size[2] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (pad_size + 1, pad_size + 1)))
+        mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (pad_size + 1, pad_size + 1)))
+    # 进行MR大小的判断
+    if mr_shape[0] < new_shape[0]:
+        pad_size = int((new_shape[0] - mr_shape[0]) / 2)
+        mr_pad_size[0] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((pad_size + 1, pad_size + 1), (0, 0), (0, 0)))
+        # 对称操作
+        mr_array = np.pad(mr_array, pad_width=((pad_size + 1, pad_size + 1), (0, 0), (0, 0)))
+    if mr_shape[1] < new_shape[1]:
+        pad_size = int((new_shape[1] - mr_shape[1]) / 2)
+        mr_pad_size[1] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((0, 0), (pad_size + 1, pad_size + 1), (0, 0)))
+        mr_array = np.pad(mr_array, pad_width=((0, 0), (pad_size + 1, pad_size + 1), (0, 0)))
+    if mr_shape[2] < new_shape[2]:
+        pad_size = int((new_shape[2] - mr_shape[2]) / 2)
+        mr_pad_size[2] = pad_size
+        ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (pad_size + 1, pad_size + 1)))
+        mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (pad_size + 1, pad_size + 1)))    
+    # 利用偏移量对index进行修正
+    ct_index = ct_index + ct_pad_size
+    mr_index = mr_index + mr_pad_size
+    z_bias = np.array([ct_index[0],
+                        ct_shape[0] - ct_index[0],
+                        mr_index[0],
+                        mr_shape[0] - mr_index[0]])
+    x_bias = np.array([ct_index[1],
+                        ct_shape[1] - ct_index[1],
+                        mr_index[1],
+                        mr_shape[1] - mr_index[1]])
+    y_bias = np.array([ct_index[2],
+                        ct_shape[2] - ct_index[2],
+                        mr_index[2],
+                        mr_shape[2] - mr_index[2]])
+    z_bias_min_index, x_bias_min_index, y_bias_min_index = np.argmin(z_bias), np.argmin(x_bias), np.argmin(y_bias)
+    # z方向进行判断
+    if z_bias_min_index == 0:
+        ct_z_range = range(0, new_shape[0])
+        mr_z_range = range(mr_index[0] - z_bias[z_bias_min_index], mr_index[0] - z_bias[z_bias_min_index] + new_shape[0])
+        # 差距过大越界的判断
+        if mr_z_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((-mr_z_range[0], 0), (0, 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((-mr_z_range[0], 0), (0, 0), (0, 0))) 
+            mr_z_range = range(0, new_shape[0])
+        if mr_z_range[-1] > new_shape[0]:
+            ct_array = np.pad(ct_array, pad_width=((0, mr_z_range[-1] - new_shape[0]), (0, 0), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, mr_z_range[-1] - new_shape[0]), (0, 0), (0, 0))) 
+            new_range_max = mr_z_range[-1]
+            mr_z_range = range(new_range_max - new_shape[0], new_range_max)
+    elif z_bias_min_index == 1:
+        ct_z_range = range(ct_shape[0] - new_shape[0], ct_shape[0])
+        mr_z_range = range(mr_index[0] + z_bias[z_bias_min_index] - new_shape[0], mr_index[0] + z_bias[z_bias_min_index])
+        # 差距过大越界的判断
+        if mr_z_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((-mr_z_range[0], 0), (0, 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((-mr_z_range[0], 0), (0, 0), (0, 0))) 
+            mr_z_range = range(0, new_shape[0])
+        if mr_z_range[-1] > new_shape[0]:
+            ct_array = np.pad(ct_array, pad_width=((0, mr_z_range[-1] - new_shape[0]), (0, 0), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, mr_z_range[-1] - new_shape[0]), (0, 0), (0, 0))) 
+            new_range_max = mr_z_range[-1]
+            mr_z_range = range(new_range_max - new_shape[0], new_range_max)
+    elif z_bias_min_index ==2:
+        ct_z_range = range(ct_index[0] - z_bias[z_bias_min_index], ct_index[0] - z_bias[z_bias_min_index] + new_shape[0])
+        mr_z_range = range(0, new_shape[0])
+        # 差距过大越界的判断
+        if ct_z_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((-ct_z_range[0], 0), (0, 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((-ct_z_range[0], 0), (0, 0), (0, 0))) 
+            ct_z_range = range(0, new_shape[0])
+        if ct_z_range[-1] > new_shape[0]:
+            ct_array = np.pad(ct_array, pad_width=((0, ct_z_range[-1] - new_shape[0]), (0, 0), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0,ct_z_range[-1] - new_shape[0]), (0, 0), (0, 0))) 
+            new_range_max = ct_z_range[-1]
+            ct_z_range = range(new_range_max - new_shape[0], new_range_max)
+    else:
+        ct_z_range = range(ct_index[0] + z_bias[z_bias_min_index] - new_shape[0], ct_index[0] + z_bias[z_bias_min_index])
+        mr_z_range = range(mr_shape[0] - new_shape[0], mr_shape[0])
+        # 差距过大越界的判断
+        if ct_z_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((-ct_z_range[0], 0), (0, 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((-ct_z_range[0], 0), (0, 0), (0, 0))) 
+            ct_z_range = range(0, new_shape[0])
+        if ct_z_range[-1] > new_shape[0]:
+            ct_array = np.pad(ct_array, pad_width=((0, ct_z_range[-1] - new_shape[0]), (0, 0), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, ct_z_range[-1] - new_shape[0]), (0, 0), (0, 0))) 
+            new_range_max = ct_z_range[-1]
+            ct_z_range = range(new_range_max - new_shape[0], new_range_max)
+    # x方向进行判断
+    if x_bias_min_index == 0:
+        ct_x_range = range(0, new_shape[1])
+        mr_x_range = range(mr_index[1] - x_bias[x_bias_min_index], mr_index[1] - x_bias[x_bias_min_index] + new_shape[1])
+        # 差距过大越界的判断
+        if mr_x_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (-mr_x_range[0], 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (-mr_x_range[0], 0), (0, 0))) 
+            mr_x_range = range(0, new_shape[1])
+        if mr_x_range[-1] > new_shape[1]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, mr_x_range[-1] - new_shape[1]), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, mr_x_range[-1] - new_shape[1]), (0, 0))) 
+            new_range_max = mr_x_range[-1]
+            mr_x_range = range(new_range_max - new_shape[1], new_range_max)
+    elif x_bias_min_index == 1:
+        ct_x_range = range(ct_shape[1] - new_shape[1], ct_shape[1])
+        mr_x_range = range(mr_index[1] + x_bias[x_bias_min_index] - new_shape[1], mr_index[1] + x_bias[x_bias_min_index])
+        # 差距过大越界的判断
+        if mr_x_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (-mr_x_range[0], 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (-mr_x_range[0], 0), (0, 0))) 
+            mr_x_range = range(0, new_shape[1])
+        if mr_x_range[-1] > new_shape[1]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, mr_x_range[-1] - new_shape[1]), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, mr_x_range[-1] - new_shape[1]), (0, 0))) 
+            new_range_max = mr_x_range[-1]
+            mr_x_range = range(new_range_max - new_shape[1], new_range_max)
+    elif x_bias_min_index ==2:
+        ct_x_range = range(ct_index[1] - x_bias[x_bias_min_index], ct_index[1] - x_bias[x_bias_min_index] + new_shape[1])
+        mr_x_range = range(0, new_shape[1])
+        # 差距过大越界的判断
+        if ct_x_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (-ct_x_range[0], 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (-ct_x_range[0], 0), (0, 0))) 
+            ct_x_range = range(0, new_shape[1])
+        if ct_x_range[-1] > new_shape[1]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, ct_x_range[-1] - new_shape[1]), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, ct_x_range[-1] - new_shape[1]), (0, 0))) 
+            new_range_max = ct_x_range[-1]
+            ct_x_range = range(new_range_max - new_shape[1], new_range_max)
+    else:
+        ct_x_range = range(ct_index[1] + x_bias[x_bias_min_index] - new_shape[1], ct_index[0] + x_bias[x_bias_min_index])
+        mr_x_range = range(mr_shape[1] - new_shape[1], mr_shape[1])
+        # 差距过大越界的判断
+        if ct_x_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (-ct_x_range[0], 0), (0, 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (-ct_x_range[0], 0), (0, 0))) 
+            ct_x_range = range(0, new_shape[1])
+        if ct_x_range[-1] > new_shape[1]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, ct_x_range[-1] - new_shape[1]), (0, 0)))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, ct_x_range[-1] - new_shape[1]), (0, 0))) 
+            new_range_max = ct_x_range[-1]
+            ct_x_range = range(new_range_max - new_shape[1], new_range_max)
+    # y方向进行判断
+    if y_bias_min_index == 0:
+        ct_y_range = range(0, new_shape[2])
+        mr_y_range = range(mr_index[2] - y_bias[y_bias_min_index], mr_index[2] - y_bias[y_bias_min_index] + new_shape[2])
+        # 差距过大越界的判断
+        if mr_y_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (-mr_y_range[0], 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (-mr_y_range[0], 0))) 
+            mr_y_range = range(0, new_shape[2])
+        if mr_y_range[-1] > new_shape[2]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (0, mr_y_range[-1] - new_shape[2])))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (0, mr_y_range[-1] - new_shape[2]))) 
+            new_range_max = mr_y_range[-1]
+            mr_y_range = range(new_range_max - new_shape[2], new_range_max)
+    elif y_bias_min_index == 1:
+        ct_y_range = range(ct_shape[2] - new_shape[2], ct_shape[2])
+        mr_y_range = range(mr_index[2] + y_bias[y_bias_min_index] - new_shape[2], mr_index[2] + y_bias[y_bias_min_index])
+        # 差距过大越界的判断
+        if mr_y_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (-mr_y_range[0], 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (-mr_y_range[0], 0))) 
+            mr_y_range = range(0, new_shape[2])
+        if mr_y_range[-1] > new_shape[2]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (0, mr_y_range[-1] - new_shape[2])))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (0, mr_y_range[-1] - new_shape[2]))) 
+            new_range_max = mr_y_range[-1]
+            mr_y_range = range(new_range_max - new_shape[2], new_range_max)
+    elif y_bias_min_index ==2:
+        ct_y_range = range(ct_index[2] - y_bias[y_bias_min_index], ct_index[2] - y_bias[y_bias_min_index] + new_shape[2])
+        mr_y_range = range(0, new_shape[2])
+        # 差距过大越界的判断
+        if ct_y_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (-ct_y_range[0], 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (-ct_y_range[0], 0))) 
+            ct_y_range = range(0, new_shape[2])
+        if ct_y_range[-1] > new_shape[2]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (0, ct_y_range[-1] - new_shape[2])))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (0, ct_y_range[-1] - new_shape[2]))) 
+            new_range_max = ct_y_range[-1]
+            ct_y_range = range(new_range_max - new_shape[2], new_range_max)
+    else:
+        ct_y_range = range(ct_index[2] + y_bias[y_bias_min_index] - new_shape[2], ct_index[2] + y_bias[y_bias_min_index])
+        mr_y_range = range(mr_shape[2] - new_shape[2], mr_shape[2])
+        # 差距过大越界的判断
+        if ct_y_range[0] < 0:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (-ct_y_range[0], 0)))
+            # 对称操作
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (-ct_y_range[0], 0))) 
+            ct_y_range = range(0, new_shape[2])
+        if ct_y_range[-1] > new_shape[2]:
+            ct_array = np.pad(ct_array, pad_width=((0, 0), (0, 0), (0, ct_y_range[-1] - new_shape[2])))
+            mr_array = np.pad(mr_array, pad_width=((0, 0), (0, 0), (0, ct_y_range[-1] - new_shape[2]))) 
+            new_range_max = ct_y_range[-1]
+            ct_y_range = range(new_range_max - new_shape[2], new_range_max)
+    # print(f'取得范围为{ct_z_range, ct_x_range, ct_y_range}')
+    # print(f'取得范围为{mr_z_range, mr_x_range, mr_y_range}')
+    ct_new_array = ct_array[ct_z_range, :, :][:, ct_x_range, :][:, :, ct_y_range]
+    mr_new_array = mr_array[mr_z_range, :, :][:, mr_x_range, :][:, :, mr_y_range]
